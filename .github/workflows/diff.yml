@@ -1,0 +1,63 @@
+name: Diff resources
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - master
+    
+env:
+  RESOURCE_GROUP_NAME: container-apps-example-rg
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write 
+
+jobs:
+  diff:
+    name: Diff resources
+    environment:
+      name: diff
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v3
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Lint bicep file
+        uses: azure/CLI@v1
+        with:
+          inlineScript: |
+            az config set bicep.use_binary_from_path=False
+            az bicep install
+
+            az bicep lint -f ./bicep/container-apps-env.bicep
+
+      - name: Diff Container Apps Env settings
+        uses: azure/CLI@v1
+        with:
+          inlineScript: |
+            az config set bicep.use_binary_from_path=False
+            az bicep install
+
+            echo -e '## Container Apps Env\n<details><summary>Resource and property changes details</summary>\n\n```' >> diff.txt
+            az deployment group what-if \
+                -f ./bicep/container-apps-env.bicep \
+                --name "container-apps-diff" \
+                -g ${{ env.RESOURCE_GROUP_NAME }} \
+                | tee -a diff.txt
+            echo -e '```\n</details>\n\n' >> diff.txt
+
+      - name: Post diff
+        uses: marocchino/sticky-pull-request-comment@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          header: header-of-comment
+          path: ./diff.txt
