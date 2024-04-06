@@ -9,7 +9,7 @@ param acrSecret string
 
 param revisionSuffix string
 param oldRevisionSuffix string
-param isExternalIngress bool
+param isExternalIngress bool = true
 
 @allowed([
   'multiple'
