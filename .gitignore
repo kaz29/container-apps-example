@@ -1,0 +1,8 @@
+.DS_Store
+/.idea/*
+/services
+/plugins
+/.envrc
+/config/nginx/ssl
+/.env
+/.vscode
