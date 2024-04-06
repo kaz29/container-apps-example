@@ -18,7 +18,7 @@ jobs:
   diff:
     name: Diff resources
     environment:
-      name: provision
+      name: diff
     runs-on: ubuntu-latest
     steps:
       - name: checkout
