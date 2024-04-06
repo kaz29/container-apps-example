@@ -25,6 +25,7 @@ resource containerApp 'Microsoft.App/containerApps@2023-04-01-preview' = {
   name: containerAppName
   location: location
   properties: {
+    workloadProfileName: 'Consumption'
     managedEnvironmentId: environment.id
     configuration: {
       activeRevisionsMode: revisionMode

@@ -40,7 +40,7 @@ jobs:
         with:
           push: true
           tags: ${{ secrets.AZURE_CONTAINER_REGISTRY_USERNAME }}.azurecr.io/${{ env.REPOSITORY_NAME }}:${{ env.TAG }}, ${{ secrets.AZURE_CONTAINER_REGISTRY_USERNAME }}.azurecr.io/${{ env.REPOSITORY_NAME }}:latest
-          file: Dockerfile
+          file: ./app/Dockerfile
           context: ./app
 
       - name: Upload bicep stript into artifact
