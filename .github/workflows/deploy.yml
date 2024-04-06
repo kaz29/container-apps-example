@@ -1,0 +1,178 @@
+name: Trigger auto deployment for example app
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+env:
+  RESOURCE_GROUP_NAME: container-apps-example-rg
+  REPOSITORY_NAME: example-app
+  APP_NAME: example-app
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout to the branch
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+
+      - name: Log in to container registry
+        uses: docker/login-action@v1
+        with:
+          registry: ${{ secrets.AZURE_CONTAINER_REGISTRY_USERNAME }}.azurecr.io
+          username: ${{ secrets.AZURE_CONTAINER_REGISTRY_USERNAME }}
+          password: ${{ secrets.AZURE_CONTAINER_REGISTRY_PASSWORD }}
+
+      - name: Set tag name to env
+        run: | 
+          echo "TAG=${GITHUB_REF##*/}" >> $GITHUB_ENV
+          echo "${GITHUB_REF##*/}" >> app/wwwroot/VERSION
+
+      - name: Build and push container image to registry
+        uses: docker/build-push-action@v2
+        with:
+          push: true
+          tags: ${{ secrets.AZURE_CONTAINER_REGISTRY_USERNAME }}.azurecr.io/${{ env.REPOSITORY_NAME }}:${{ env.TAG }}, ${{ secrets.AZURE_CONTAINER_REGISTRY_USERNAME }}.azurecr.io/${{ env.REPOSITORY_NAME }}:latest
+          file: ./Dockerfile
+          context: ./
+
+      - name: Upload bicep stript into artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: bicep
+          path: bicep/*
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: deploy # 環境ごとに変更すること！
+      url: https://${{ steps.fqdn.outputs.fqdn }}
+    outputs:
+      revision_suffix: ${{ steps.revision_suffix.outputs.revision_suffix }}
+      previous_revision_suffix: ${{ steps.previous_revision_suffix.outputs.previous_revision_suffix }}
+      fqdn: ${{ steps.fqdn.outputs.fqdn }}
+
+    steps:
+      - name: Download bicep script from artifact
+        uses: actions/download-artifact@v2
+        with:
+          name: bicep
+
+      - name: Set tag name to env
+        run: | 
+          echo "TAG=${GITHUB_REF##*/}" >> $GITHUB_ENV
+
+      # タグ名から.(ドット)を除去する
+      - name: Set revision suffix name to env
+        id: revision_suffix
+        run: | 
+          echo "REVISION_SUFFIX=${TAG//./}" >> $GITHUB_ENV
+          echo "revision_suffix=${TAG//./}" >> $GITHUB_OUTPUT
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Get Previous revision name
+        id: previous_revision_suffix
+        uses: azure/CLI@v1
+        with:
+          inlineScript: |
+            az extension add --upgrade --name containerapp
+            export REVISIONS=`az containerapp revision list --resource-group ${{ env.RESOURCE_GROUP_NAME }} --name ${{ env.APP_NAME }} --query '[].name' --out tsv`
+            echo "REVISION_NUM=`az containerapp revision list --resource-group ${{ env.RESOURCE_GROUP_NAME }} --name ${{ env.APP_NAME }} --query '[] | length(@)' --out tsv`" >> $GITHUB_ENV
+            echo "PREVIOUS_REVISION_NAME=${REVISIONS##*--}" >> $GITHUB_ENV
+            echo "previous_revision_suffix=${REVISIONS##*--}" >> $GITHUB_OUTPUT
+
+      - name: Active revision count check
+        if: ${{ env.REVISION_NUM > 1 }} 
+        uses: actions/github-script@v3
+        with:
+          script: |
+              core.setFailed('Multiple revisions are active!')
+
+      - name: First deploy
+        if: ${{ env.REVISION_NUM == 0 }} 
+        run: | 
+          echo "PREVIOUS_REVISION_NAME=${REVISION_SUFFIX}" >> $GITHUB_ENV
+
+      - name: Deploy to containerapp
+        uses: azure/CLI@v1
+        with:
+          inlineScript: |
+            az extension add --upgrade --name containerapp
+
+            az config set bicep.use_binary_from_path=False
+            az bicep install
+
+            az deployment group create \
+                -f ./${DEPLOY_BICEP_FILE} \
+                -g ${{ env.RESOURCE_GROUP_NAME }} \
+                --name "${{ env.APP_NAME }}-${{ env.REVISION_SUFFIX }}" \
+                --parameters \
+                  acrUserName=${{ secrets.AZURE_CONTAINER_REGISTRY_USERNAME }} \
+                  acrSecret=${{ secrets.AZURE_CONTAINER_REGISTRY_PASSWORD }} \
+                  tagName="${{ env.TAG }}" \
+                  revisionSuffix=${{ env.REVISION_SUFFIX }} \
+                  oldRevisionSuffix=${{ env.PREVIOUS_REVISION_NAME }}
+
+  flip:
+    runs-on: ubuntu-latest
+    needs: deploy
+    environment:
+      name: flip
+    steps:
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Flip revisions
+        uses: azure/CLI@v1
+        with:
+          inlineScript: |
+            az extension add --upgrade --name containerapp
+            az containerapp ingress traffic set \
+              -g ${{ env.RESOURCE_GROUP_NAME }} \
+              -n ${{ env.APP_NAME }} \
+              --revision-weight \
+                ${{ env.APP_NAME }}--${{ needs.deploy.outputs.revision_suffix }}=100 \
+                ${{ env.APP_NAME }}--${{ needs.deploy.outputs.previous_revision_suffix }}=0
+              
+  deavtivate:
+    runs-on: ubuntu-latest
+    needs: deploy
+    environment:
+      name: deactivate
+    steps:
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deactivate previous revision
+        uses: azure/CLI@v1
+        with:
+          inlineScript: |
+            az extension add --upgrade --name containerapp
+            az containerapp revision deactivate \
+              -g ${{ env.RESOURCE_GROUP_NAME }} \
+              -n ${{ env.APP_NAME }} \
+              --revision \
+                ${{ env.APP_NAME }}--${{ needs.deploy.outputs.previous_revision_suffix }}
+
