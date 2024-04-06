@@ -1,4 +1,4 @@
-param environmentName string = 'example-container-apps-env-test'
+param environmentName string = 'example-container-apps-env'
 param containerAppName string = 'example-app'
 param location string = resourceGroup().location
 param imageName string = 'example-app'
