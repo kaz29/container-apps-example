@@ -40,8 +40,8 @@ jobs:
         with:
           push: true
           tags: ${{ secrets.AZURE_CONTAINER_REGISTRY_USERNAME }}.azurecr.io/${{ env.REPOSITORY_NAME }}:${{ env.TAG }}, ${{ secrets.AZURE_CONTAINER_REGISTRY_USERNAME }}.azurecr.io/${{ env.REPOSITORY_NAME }}:latest
-          file: ./Dockerfile
-          context: ./
+          file: Dockerfile
+          context: ./app
 
       - name: Upload bicep stript into artifact
         uses: actions/upload-artifact@v2
@@ -154,7 +154,7 @@ jobs:
               
   deavtivate:
     runs-on: ubuntu-latest
-    needs: deploy
+    needs: flip
     environment:
       name: deactivate
     steps:
