@@ -117,7 +117,7 @@ jobs:
             az bicep install
 
             az deployment group create \
-                -f ./${DEPLOY_BICEP_FILE} \
+                -f ./deploy.bicep \
                 -g ${{ env.RESOURCE_GROUP_NAME }} \
                 --name "${{ env.APP_NAME }}-${{ env.REVISION_SUFFIX }}" \
                 --parameters \
