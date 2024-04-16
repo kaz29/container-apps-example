@@ -54,10 +54,8 @@ resource environment 'Microsoft.App/managedEnvironments@2023-05-01' = {
       }
     }
     workloadProfiles: [{
-      name: 'myworkload'
-      maximumCount: 10
-      minimumCount: 3
-      workloadProfileType: 'D4'
+      name: 'Consumption'
+      workloadProfileType: 'Consumption'
     }]
   }
 }
