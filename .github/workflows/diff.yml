@@ -37,7 +37,6 @@ jobs:
           inlineScript: |
             az config set bicep.use_binary_from_path=False
             az bicep install
-
             az bicep lint -f ./bicep/container-apps-env.bicep
 
       - name: Diff Container Apps Env settings
